@@ -1,27 +1,73 @@
-name: Build LichtFeld Studio
-on: [workflow_dispatch] 
+name: Windows CUDA Build (Fork Upload)
+
+on:
+  workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: windows-latest
+  build-windows:
+    runs-on: windows-2022
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}\..\vcpkg
+      VCPKG_BUILD_TYPE: release
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source
+        uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           submodules: recursive
 
-      - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@master
+      - name: Install CUDA 12.8
+        run: |
+          cd ..
+          Invoke-WebRequest https://developer.download.nvidia.com/compute/cuda/12.8.0/local_installers/cuda_12.8.0_571.96_windows.exe -OutFile cuda.exe -Verbose
+          Start-Process -FilePath .\cuda.exe -ArgumentList "-y -s -accepteula -toolkit -override -noDisplayDriver" -Wait
+
+      - name: Set CUDA environment
+        run: |
+          echo "CUDA_PATH_V12_8=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\libnvvp" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Cache vcpkg tool
+        id: cache-vcpkg-tool
+        uses: actions/cache@v4
         with:
-          cuda: '12.8.0'
+          path: ${{ env.VCPKG_ROOT }}
+          key: vcpkg-tool-${{ runner.os }}-2026-02-21
+          restore-keys: vcpkg-tool-${{ runner.os }}-
 
-      - name: Compile Application
-        run: .\build_lichtfeld.ps1 -Configuration Release
-        shell: powershell
+      - name: Setup vcpkg
+        if: steps.cache-vcpkg-tool.outputs.cache-hit != 'true'
+        run: |
+          cd ..
+          git clone https://github.com/microsoft/vcpkg.git
+          .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
 
-      - name: Upload Binary
+      - name: Cache vcpkg_installed
+        uses: actions/cache@v4
+        with:
+          path: build/vcpkg_installed
+          key: vcpkg-installed-${{ runner.os }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: vcpkg-installed-${{ runner.os }}-
+
+      - name: Configure
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cmake -B build -S . -G Ninja -DCMAKE_BUILD_TYPE=Release -DLFS_FAST_COMPILE=ON -DBUILD_PYTHON_STUBS=OFF -DLFS_DEV_IMPORT_SOURCE_PYTHON=OFF -DLFS_DEV_IMPORT_SOURCE_RESOURCES=OFF -DCUDA_DEVICE_DEBUG=OFF
+
+      - name: Build
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          set PATH=%CD%\build;%CD%\build\vcpkg_installed\x64-windows\bin;%PATH%
+          cmake --build build -j %NUMBER_OF_PROCESSORS%
+
+      - name: Upload Binary Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: LichtFeld-Studio-Windows
           path: |
-            **/*.exe
-            **/*.dll
+            build/**/*.exe
+            build/**/*.dll
