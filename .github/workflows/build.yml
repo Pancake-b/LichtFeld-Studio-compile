@@ -10,7 +10,7 @@ jobs:
           submodules: recursive
 
       - name: Install CUDA Toolkit
-        uses: Jimver/cuda-toolkit@v2
+        uses: Jimver/cuda-toolkit@master
         with:
           cuda: '12.8.0'
 
