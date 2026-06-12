@@ -71,3 +71,4 @@ jobs:
           path: |
             build/**/*.exe
             build/**/*.dll
+            !build/vcpkg_installed/**
